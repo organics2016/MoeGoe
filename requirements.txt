@@ -1,6 +1,6 @@
 numba
 librosa
-numpy==1.22.0
+numpy==1.23.0
 scipy
 torch
 unidecode
@@ -17,3 +17,5 @@ indic_transliteration
 num_thai
 opencc
 audonnx
+
+websockets
