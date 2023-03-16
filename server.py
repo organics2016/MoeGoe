@@ -1,13 +1,15 @@
 import asyncio
+import json
+
 import websockets
 import utils
 import re
 import commons
+import base64
 
 from models import SynthesizerTrn
 from text import text_to_sequence, _clean_text
 from torch import no_grad, LongTensor
-from scipy.io.wavfile import write
 
 import logging
 
@@ -88,8 +90,14 @@ async def handler(websocket):
                                    noise_scale_w=noise_scale_w, length_scale=length_scale)[0][
                 0, 0].data.cpu().float().numpy()
 
-        write('output/demo_t.wav', hps_ms.data.sampling_rate, audio)
-        print('Successfully saved!')
+        print(hps_ms.data.sampling_rate)
+
+        await websocket.send((0).to_bytes(1, "big", signed=False))
+        await websocket.send(hps_ms.data.sampling_rate.to_bytes(4, "big", signed=False))
+        await websocket.send(audio.tobytes())
+        await websocket.send((1).to_bytes(1, "big", signed=False))
+
+        print('Successfully send!')
 
 
 async def main():
