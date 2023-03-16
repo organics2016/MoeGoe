@@ -1,19 +1,18 @@
 import asyncio
-import json
+import logging
+import re
+from logging.config import fileConfig
 
 import websockets
-import utils
-import re
-import commons
-import base64
-
-from models import SynthesizerTrn
-from text import text_to_sequence, _clean_text
 from torch import no_grad, LongTensor
 
-import logging
+import commons
+import utils
+from models import SynthesizerTrn
+from text import text_to_sequence
 
-logging.getLogger('numba').setLevel(logging.INFO)
+fileConfig('logging_config.ini')
+logging.getLogger('numba').setLevel(logging.WARNING)
 
 
 def get_text(text, hps, cleaned=False):
