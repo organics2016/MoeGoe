@@ -69,8 +69,19 @@ utils.load_checkpoint(model, net_g_ms)
 
 async def handler(websocket):
     while True:
-        text = await websocket.recv()
-        text = '[ZH]' + text + '[ZH]'
+        text: str = await websocket.recv()
+        text = text.strip()
+        if len(text) <= 0:
+            continue
+
+        speaker_id = 2
+
+        if '\u3040' <= text[0] <= '\u309f' or '\u30a0' <= text[0] <= '\u30ff':
+            text = '[JA]' + text + '[JA]'
+            speaker_id = 0
+        else:
+            text = '[ZH]' + text + '[ZH]'
+
         print(text)
         length_scale, text = get_label_value(text, 'LENGTH', 1, 'length scale')
         noise_scale, text = get_label_value(text, 'NOISE', 0.667, 'noise scale')
@@ -78,8 +89,6 @@ async def handler(websocket):
         cleaned, text = get_label(text, 'CLEANED')
 
         stn_tst = get_text(text, hps_ms, cleaned=cleaned)
-
-        speaker_id = 2
 
         with no_grad():
             x_tst = stn_tst.unsqueeze(0)
