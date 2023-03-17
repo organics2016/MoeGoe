@@ -46,22 +46,21 @@ def get_label(text, label):
         return False, text
 
 
-model = 'model/1374_epochs.pth'
-config = 'model/1374_config.json'
+model = 'model/1026_epochs.pth'
+config = 'model/1026_config.json'
 
 hps_ms = utils.get_hparams_from_file(config)
 n_speakers = hps_ms.data.n_speakers if 'n_speakers' in hps_ms.data.keys() else 0
 n_symbols = len(hps_ms.symbols) if 'symbols' in hps_ms.keys() else 0
 speakers = hps_ms.speakers if 'speakers' in hps_ms.keys() else ['0']
 use_f0 = hps_ms.data.use_f0 if 'use_f0' in hps_ms.data.keys() else False
-emotion_embedding = hps_ms.data.emotion_embedding if 'emotion_embedding' in hps_ms.data.keys() else False
 
 net_g_ms = SynthesizerTrn(
     n_symbols,
     hps_ms.data.filter_length // 2 + 1,
     hps_ms.train.segment_size // hps_ms.data.hop_length,
     n_speakers=n_speakers,
-    emotion_embedding=emotion_embedding,
+    emotion_embedding=False,
     **hps_ms.model)
 _ = net_g_ms.eval()
 utils.load_checkpoint(model, net_g_ms)
@@ -78,7 +77,6 @@ async def handler(websocket):
 
         if '\u3040' <= text[0] <= '\u309f' or '\u30a0' <= text[0] <= '\u30ff':
             text = '[JA]' + text + '[JA]'
-            speaker_id = 0
         else:
             text = '[ZH]' + text + '[ZH]'
 
