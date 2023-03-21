@@ -1,13 +1,15 @@
-from scipy.io.wavfile import write
-from mel_processing import spectrogram_torch
-from text import text_to_sequence, _clean_text
-from models import SynthesizerTrn
-import utils
-import commons
-import sys
-import re
-from torch import no_grad, LongTensor
 import logging
+import re
+import sys
+
+from scipy.io.wavfile import write
+from torch import no_grad, LongTensor
+
+import commons
+import utils
+from mel_processing import spectrogram_torch
+from models import SynthesizerTrn
+from text import text_to_sequence, _clean_text
 
 logging.getLogger('numba').setLevel(logging.WARNING)
 
@@ -92,8 +94,10 @@ if __name__ == '__main__':
     n_symbols = len(hps_ms.symbols) if 'symbols' in hps_ms.keys() else 0
     speakers = hps_ms.speakers if 'speakers' in hps_ms.keys() else ['0']
     use_f0 = hps_ms.data.use_f0 if 'use_f0' in hps_ms.data.keys() else False
-    emotion_embedding = hps_ms.data.emotion_embedding if 'emotion_embedding' in hps_ms.data.keys() else False
+    # emotion_embedding = hps_ms.data.emotion_embedding if 'emotion_embedding' in hps_ms.data.keys() else False
+    emotion_embedding = False
 
+    # [ZH]DevOps是Development和Operations的组合词，是一种重视“软件开发人员（Dev）”和“IT运维技术人员（Ops）”之间沟通合作的文化、运动或惯例。当然，你可以了解一下建木DevOps，它是这个思想的一个很好的实现。不过在我看来它只是一个恐怖的管道。害怕。[ZH]
     net_g_ms = SynthesizerTrn(
         n_symbols,
         hps_ms.data.filter_length // 2 + 1,
