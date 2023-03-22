@@ -75,10 +75,13 @@ async def handler(websocket):
 
         speaker_id = 2
 
-        if '\u3040' <= text[0] <= '\u309f' or '\u30a0' <= text[0] <= '\u30ff':
-            text = '[JA]' + text + '[JA]'
-        else:
-            text = '[ZH]' + text + '[ZH]'
+        suffix = '[ZH]'
+        for i in range(0, 2):
+            if '\u3040' <= text[i] <= '\u309f' or '\u30a0' <= text[i] <= '\u30ff':
+                suffix = '[JA]'
+                break
+
+        text = suffix + text + suffix
 
         print(text)
         length_scale, text = get_label_value(text, 'LENGTH', 1, 'length scale')
