@@ -3,8 +3,10 @@ import logging
 import re
 from logging.config import fileConfig
 
+import torch
 import websockets
-from torch import no_grad, LongTensor
+from torch import no_grad
+from torch.cuda import LongTensor
 
 import commons
 import utils
@@ -13,6 +15,7 @@ from text import text_to_sequence
 
 fileConfig('logging_config.ini')
 logging.getLogger('numba').setLevel(logging.WARNING)
+device = torch.device('cuda')
 
 
 def get_text(text, hps, cleaned=False):
@@ -61,6 +64,7 @@ net_g_ms = SynthesizerTrn(
     hps_ms.train.segment_size // hps_ms.data.hop_length,
     n_speakers=n_speakers,
     emotion_embedding=False,
+    device=device,
     **hps_ms.model)
 _ = net_g_ms.eval()
 utils.load_checkpoint(model, net_g_ms)
@@ -84,7 +88,7 @@ async def handler(websocket):
         text = suffix + text + suffix
 
         print(text)
-        length_scale, text = get_label_value(text, 'LENGTH', 1, 'length scale')
+        length_scale, text = get_label_value(text, 'LENGTH', 1.35, 'length scale')
         noise_scale, text = get_label_value(text, 'NOISE', 0.667, 'noise scale')
         noise_scale_w, text = get_label_value(text, 'NOISEW', 0.8, 'deviation of noise')
         cleaned, text = get_label(text, 'CLEANED')

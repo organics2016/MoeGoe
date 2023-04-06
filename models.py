@@ -1,14 +1,14 @@
 import math
+
 import torch
 from torch import nn
+from torch.nn import Conv1d, ConvTranspose1d
 from torch.nn import functional as F
+from torch.nn.utils import weight_norm
 
+import attentions
 import commons
 import modules
-import attentions
-
-from torch.nn import Conv1d, ConvTranspose1d
-from torch.nn.utils import weight_norm
 from commons import init_weights
 
 
@@ -39,11 +39,11 @@ class StochasticDurationPredictor(nn.Module):
       self.post_flows.append(modules.ConvFlow(2, filter_channels, kernel_size, n_layers=3))
       self.post_flows.append(modules.Flip())
 
-    self.pre = nn.Conv1d(in_channels, filter_channels, 1)
-    self.proj = nn.Conv1d(filter_channels, filter_channels, 1)
+    self.pre = nn.Conv1d(in_channels, filter_channels, 1,device='cuda')
+    self.proj = nn.Conv1d(filter_channels, filter_channels, 1,device='cuda')
     self.convs = modules.DDSConv(filter_channels, kernel_size, n_layers=3, p_dropout=p_dropout)
     if gin_channels != 0:
-      self.cond = nn.Conv1d(gin_channels, filter_channels, 1)
+      self.cond = nn.Conv1d(gin_channels, filter_channels, 1,device='cuda')
 
   def forward(self, x, x_mask, w=None, g=None, reverse=False, noise_scale=1.0):
     x = torch.detach(x)
@@ -58,7 +58,7 @@ class StochasticDurationPredictor(nn.Module):
       flows = self.flows
       assert w is not None
 
-      logdet_tot_q = 0 
+      logdet_tot_q = 0
       h_w = self.post_pre(w)
       h_w = self.post_convs(h_w, x_mask)
       h_w = self.post_proj(h_w) * x_mask
@@ -67,7 +67,7 @@ class StochasticDurationPredictor(nn.Module):
       for flow in self.post_flows:
         z_q, logdet_q = flow(z_q, x_mask, g=(x + h_w))
         logdet_tot_q += logdet_q
-      z_u, z1 = torch.split(z_q, [1, 1], 1) 
+      z_u, z1 = torch.split(z_q, [1, 1], 1)
       u = torch.sigmoid(z_u) * x_mask
       z0 = (w - u) * x_mask
       logdet_tot_q += torch.sum((F.logsigmoid(z_u) + F.logsigmoid(-z_u)) * x_mask, [1,2])
@@ -140,7 +140,8 @@ class TextEncoder(nn.Module):
       n_layers,
       kernel_size,
       p_dropout,
-      emotion_embedding):
+      emotion_embedding,
+      device):
     super().__init__()
     self.n_vocab = n_vocab
     self.out_channels = out_channels
@@ -151,9 +152,10 @@ class TextEncoder(nn.Module):
     self.kernel_size = kernel_size
     self.p_dropout = p_dropout
     self.emotion_embedding = emotion_embedding
-    
+    self.device = device
+
     if self.n_vocab!=0:
-      self.emb = nn.Embedding(n_vocab, hidden_channels)
+      self.emb = nn.Embedding(n_vocab, hidden_channels).to(device=self.device)
       if emotion_embedding:
         self.emo_proj = nn.Linear(1024, hidden_channels)
       nn.init.normal_(self.emb.weight, 0.0, hidden_channels**-0.5)
@@ -164,8 +166,9 @@ class TextEncoder(nn.Module):
       n_heads,
       n_layers,
       kernel_size,
-      p_dropout)
-    self.proj= nn.Conv1d(hidden_channels, out_channels * 2, 1)
+      p_dropout,
+      device=self.device)
+    self.proj= nn.Conv1d(hidden_channels, out_channels * 2, 1,device=self.device)
 
   def forward(self, x, x_lengths, emotion_embedding=None):
     if self.n_vocab!=0:
@@ -173,7 +176,7 @@ class TextEncoder(nn.Module):
     if emotion_embedding is not None:
       x = x + self.emo_proj(emotion_embedding.unsqueeze(1))
     x = torch.transpose(x, 1, -1) # [b, h, t]
-    x_mask = torch.unsqueeze(commons.sequence_mask(x_lengths, x.size(2)), 1).to(x.dtype)
+    x_mask = torch.unsqueeze(commons.sequence_mask(x_lengths, x.size(2)), 1).to(dtype=x.dtype,device=self.device)
 
     x = self.encoder(x * x_mask, x_mask)
     stats = self.proj(x) * x_mask
@@ -252,14 +255,14 @@ class Generator(torch.nn.Module):
         super(Generator, self).__init__()
         self.num_kernels = len(resblock_kernel_sizes)
         self.num_upsamples = len(upsample_rates)
-        self.conv_pre = Conv1d(initial_channel, upsample_initial_channel, 7, 1, padding=3)
+        self.conv_pre = Conv1d(initial_channel, upsample_initial_channel, 7, 1, padding=3,device='cuda')
         resblock = modules.ResBlock1 if resblock == '1' else modules.ResBlock2
 
         self.ups = nn.ModuleList()
         for i, (u, k) in enumerate(zip(upsample_rates, upsample_kernel_sizes)):
             self.ups.append(weight_norm(
                 ConvTranspose1d(upsample_initial_channel//(2**i), upsample_initial_channel//(2**(i+1)),
-                                k, u, padding=(k-u)//2)))
+                                k, u, padding=(k-u)//2,device='cuda')))
 
         self.resblocks = nn.ModuleList()
         for i in range(len(self.ups)):
@@ -267,11 +270,11 @@ class Generator(torch.nn.Module):
             for j, (k, d) in enumerate(zip(resblock_kernel_sizes, resblock_dilation_sizes)):
                 self.resblocks.append(resblock(ch, k, d))
 
-        self.conv_post = Conv1d(ch, 1, 7, 1, padding=3, bias=False)
+        self.conv_post = Conv1d(ch, 1, 7, 1, padding=3, bias=False,device='cuda')
         self.ups.apply(init_weights)
 
         if gin_channels != 0:
-            self.cond = nn.Conv1d(gin_channels, upsample_initial_channel, 1)
+            self.cond = nn.Conv1d(gin_channels, upsample_initial_channel, 1,device='cuda')
 
     def forward(self, x, g=None):
         x = self.conv_pre(x)
@@ -300,7 +303,7 @@ class SynthesizerTrn(nn.Module):
   Synthesizer for Training
   """
 
-  def __init__(self, 
+  def __init__(self,
     n_vocab,
     spec_channels,
     segment_size,
@@ -311,16 +314,17 @@ class SynthesizerTrn(nn.Module):
     n_layers,
     kernel_size,
     p_dropout,
-    resblock, 
-    resblock_kernel_sizes, 
-    resblock_dilation_sizes, 
-    upsample_rates, 
-    upsample_initial_channel, 
+    resblock,
+    resblock_kernel_sizes,
+    resblock_dilation_sizes,
+    upsample_rates,
+    upsample_initial_channel,
     upsample_kernel_sizes,
     n_speakers=0,
     gin_channels=0,
     use_sdp=True,
     emotion_embedding=False,
+    device=None,
     **kwargs):
 
     super().__init__()
@@ -353,7 +357,8 @@ class SynthesizerTrn(nn.Module):
         n_layers,
         kernel_size,
         p_dropout,
-        emotion_embedding)
+        emotion_embedding,
+        device)
     self.dec = Generator(inter_channels, resblock, resblock_kernel_sizes, resblock_dilation_sizes, upsample_rates, upsample_initial_channel, upsample_kernel_sizes, gin_channels=gin_channels)
     self.enc_q = PosteriorEncoder(spec_channels, inter_channels, hidden_channels, 5, 1, 16, gin_channels=gin_channels)
     self.flow = ResidualCouplingBlock(inter_channels, hidden_channels, 5, 1, 4, gin_channels=gin_channels)
@@ -364,7 +369,7 @@ class SynthesizerTrn(nn.Module):
       self.dp = DurationPredictor(hidden_channels, 256, 3, 0.5, gin_channels=gin_channels)
 
     if n_speakers > 1:
-      self.emb_g = nn.Embedding(n_speakers, gin_channels)
+      self.emb_g = nn.Embedding(n_speakers, gin_channels).to(device=device)
 
   def infer(self, x, x_lengths, sid=None, noise_scale=1, length_scale=1, noise_scale_w=1., max_len=None, emotion_embedding=None):
     x, m_p, logs_p, x_mask = self.enc_p(x, x_lengths, emotion_embedding)

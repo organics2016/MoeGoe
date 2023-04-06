@@ -1,15 +1,14 @@
 import math
+
 import torch
 from torch import nn
-from torch.nn import functional as F
-
 from torch.nn import Conv1d
+from torch.nn import functional as F
 from torch.nn.utils import weight_norm, remove_weight_norm
 
 import commons
 from commons import init_weights, get_padding
 from transforms import piecewise_rational_quadratic_transform
-
 
 LRELU_SLOPE = 0.1
 
@@ -20,8 +19,8 @@ class LayerNorm(nn.Module):
     self.channels = channels
     self.eps = eps
 
-    self.gamma = nn.Parameter(torch.ones(channels))
-    self.beta = nn.Parameter(torch.zeros(channels))
+    self.gamma = nn.Parameter(torch.ones(channels,device='cuda'))
+    self.beta = nn.Parameter(torch.zeros(channels,device='cuda'))
 
   def forward(self, x):
     x = x.transpose(1, -1)
@@ -84,9 +83,9 @@ class DDSConv(nn.Module):
       dilation = kernel_size ** i
       padding = (kernel_size * dilation - dilation) // 2
       self.convs_sep.append(nn.Conv1d(channels, channels, kernel_size, 
-          groups=channels, dilation=dilation, padding=padding
+          groups=channels, dilation=dilation, padding=padding,device='cuda'
       ))
-      self.convs_1x1.append(nn.Conv1d(channels, channels, 1))
+      self.convs_1x1.append(nn.Conv1d(channels, channels, 1,device='cuda'))
       self.norms_1.append(LayerNorm(channels))
       self.norms_2.append(LayerNorm(channels))
 
@@ -121,14 +120,14 @@ class WN(torch.nn.Module):
     self.drop = nn.Dropout(p_dropout)
 
     if gin_channels != 0:
-      cond_layer = torch.nn.Conv1d(gin_channels, 2*hidden_channels*n_layers, 1)
+      cond_layer = torch.nn.Conv1d(gin_channels, 2*hidden_channels*n_layers, 1,device='cuda')
       self.cond_layer = torch.nn.utils.weight_norm(cond_layer, name='weight')
 
     for i in range(n_layers):
       dilation = dilation_rate ** i
       padding = int((kernel_size * dilation - dilation) / 2)
       in_layer = torch.nn.Conv1d(hidden_channels, 2*hidden_channels, kernel_size,
-                                 dilation=dilation, padding=padding)
+                                 dilation=dilation, padding=padding,device='cuda')
       in_layer = torch.nn.utils.weight_norm(in_layer, name='weight')
       self.in_layers.append(in_layer)
 
@@ -138,7 +137,7 @@ class WN(torch.nn.Module):
       else:
         res_skip_channels = hidden_channels
 
-      res_skip_layer = torch.nn.Conv1d(hidden_channels, res_skip_channels, 1)
+      res_skip_layer = torch.nn.Conv1d(hidden_channels, res_skip_channels, 1,device='cuda')
       res_skip_layer = torch.nn.utils.weight_norm(res_skip_layer, name='weight')
       self.res_skip_layers.append(res_skip_layer)
 
@@ -186,21 +185,21 @@ class ResBlock1(torch.nn.Module):
         super(ResBlock1, self).__init__()
         self.convs1 = nn.ModuleList([
             weight_norm(Conv1d(channels, channels, kernel_size, 1, dilation=dilation[0],
-                               padding=get_padding(kernel_size, dilation[0]))),
+                               padding=get_padding(kernel_size, dilation[0]),device='cuda')),
             weight_norm(Conv1d(channels, channels, kernel_size, 1, dilation=dilation[1],
-                               padding=get_padding(kernel_size, dilation[1]))),
+                               padding=get_padding(kernel_size, dilation[1]),device='cuda')),
             weight_norm(Conv1d(channels, channels, kernel_size, 1, dilation=dilation[2],
-                               padding=get_padding(kernel_size, dilation[2])))
+                               padding=get_padding(kernel_size, dilation[2]),device='cuda'))
         ])
         self.convs1.apply(init_weights)
 
         self.convs2 = nn.ModuleList([
             weight_norm(Conv1d(channels, channels, kernel_size, 1, dilation=1,
-                               padding=get_padding(kernel_size, 1))),
+                               padding=get_padding(kernel_size, 1),device='cuda')),
             weight_norm(Conv1d(channels, channels, kernel_size, 1, dilation=1,
-                               padding=get_padding(kernel_size, 1))),
+                               padding=get_padding(kernel_size, 1),device='cuda')),
             weight_norm(Conv1d(channels, channels, kernel_size, 1, dilation=1,
-                               padding=get_padding(kernel_size, 1)))
+                               padding=get_padding(kernel_size, 1),device='cuda'))
         ])
         self.convs2.apply(init_weights)
 
@@ -278,8 +277,8 @@ class ElementwiseAffine(nn.Module):
   def __init__(self, channels):
     super().__init__()
     self.channels = channels
-    self.m = nn.Parameter(torch.zeros(channels,1))
-    self.logs = nn.Parameter(torch.zeros(channels,1))
+    self.m = nn.Parameter(torch.zeros(channels,1,device='cuda'))
+    self.logs = nn.Parameter(torch.zeros(channels,1,device='cuda'))
 
   def forward(self, x, x_mask, reverse=False, **kwargs):
     if not reverse:
@@ -312,9 +311,9 @@ class ResidualCouplingLayer(nn.Module):
     self.half_channels = channels // 2
     self.mean_only = mean_only
 
-    self.pre = nn.Conv1d(self.half_channels, hidden_channels, 1)
+    self.pre = nn.Conv1d(self.half_channels, hidden_channels, 1,device='cuda')
     self.enc = WN(hidden_channels, kernel_size, dilation_rate, n_layers, p_dropout=p_dropout, gin_channels=gin_channels)
-    self.post = nn.Conv1d(hidden_channels, self.half_channels * (2 - mean_only), 1)
+    self.post = nn.Conv1d(hidden_channels, self.half_channels * (2 - mean_only), 1,device='cuda')
     self.post.weight.data.zero_()
     self.post.bias.data.zero_()
 
@@ -351,9 +350,9 @@ class ConvFlow(nn.Module):
     self.tail_bound = tail_bound
     self.half_channels = in_channels // 2
 
-    self.pre = nn.Conv1d(self.half_channels, filter_channels, 1)
+    self.pre = nn.Conv1d(self.half_channels, filter_channels, 1,device='cuda')
     self.convs = DDSConv(filter_channels, kernel_size, n_layers, p_dropout=0.)
-    self.proj = nn.Conv1d(filter_channels, self.half_channels * (num_bins * 3 - 1), 1)
+    self.proj = nn.Conv1d(filter_channels, self.half_channels * (num_bins * 3 - 1), 1,device='cuda')
     self.proj.weight.data.zero_()
     self.proj.bias.data.zero_()
 

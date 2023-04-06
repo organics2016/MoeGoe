@@ -1,14 +1,15 @@
 import math
+
 import torch
 from torch import nn
 from torch.nn import functional as F
 
 import commons
 from modules import LayerNorm
-   
+
 
 class Encoder(nn.Module):
-  def __init__(self, hidden_channels, filter_channels, n_heads, n_layers, kernel_size=1, p_dropout=0., window_size=4, **kwargs):
+  def __init__(self, hidden_channels, filter_channels, n_heads, n_layers, kernel_size=1, p_dropout=0., window_size=4, device=None, **kwargs):
     super().__init__()
     self.hidden_channels = hidden_channels
     self.filter_channels = filter_channels
@@ -23,8 +24,9 @@ class Encoder(nn.Module):
     self.norm_layers_1 = nn.ModuleList()
     self.ffn_layers = nn.ModuleList()
     self.norm_layers_2 = nn.ModuleList()
+    self.device = device
     for i in range(self.n_layers):
-      self.attn_layers.append(MultiHeadAttention(hidden_channels, hidden_channels, n_heads, p_dropout=p_dropout, window_size=window_size))
+      self.attn_layers.append(MultiHeadAttention(hidden_channels, hidden_channels, n_heads, p_dropout=p_dropout, window_size=window_size,device=self.device))
       self.norm_layers_1.append(LayerNorm(hidden_channels))
       self.ffn_layers.append(FFN(hidden_channels, hidden_channels, filter_channels, kernel_size, p_dropout=p_dropout))
       self.norm_layers_2.append(LayerNorm(hidden_channels))
@@ -87,7 +89,7 @@ class Decoder(nn.Module):
       y = self.encdec_attn_layers[i](x, h, encdec_attn_mask)
       y = self.drop(y)
       x = self.norm_layers_1[i](x + y)
-      
+
       y = self.ffn_layers[i](x, x_mask)
       y = self.drop(y)
       x = self.norm_layers_2[i](x + y)
@@ -96,7 +98,7 @@ class Decoder(nn.Module):
 
 
 class MultiHeadAttention(nn.Module):
-  def __init__(self, channels, out_channels, n_heads, p_dropout=0., window_size=None, heads_share=True, block_length=None, proximal_bias=False, proximal_init=False):
+  def __init__(self, channels, out_channels, n_heads, p_dropout=0., window_size=None, heads_share=True, block_length=None, proximal_bias=False, proximal_init=False,device=None):
     super().__init__()
     assert channels % n_heads == 0
 
@@ -112,11 +114,12 @@ class MultiHeadAttention(nn.Module):
     self.attn = None
 
     self.k_channels = channels // n_heads
-    self.conv_q = nn.Conv1d(channels, channels, 1)
-    self.conv_k = nn.Conv1d(channels, channels, 1)
-    self.conv_v = nn.Conv1d(channels, channels, 1)
-    self.conv_o = nn.Conv1d(channels, out_channels, 1)
-    self.drop = nn.Dropout(p_dropout)
+    self.conv_q = nn.Conv1d(channels, channels, 1,device=device)
+    self.conv_k = nn.Conv1d(channels, channels, 1,device=device)
+    self.conv_v = nn.Conv1d(channels, channels, 1,device=device)
+    self.conv_o = nn.Conv1d(channels, out_channels, 1,device=device)
+    self.drop = nn.Dropout(p_dropout).to(device=device)
+    self.device = device
 
     if window_size is not None:
       n_heads_rel = 1 if heads_share else n_heads
@@ -131,12 +134,12 @@ class MultiHeadAttention(nn.Module):
       with torch.no_grad():
         self.conv_k.weight.copy_(self.conv_q.weight)
         self.conv_k.bias.copy_(self.conv_q.bias)
-      
+
   def forward(self, x, c, attn_mask=None):
     q = self.conv_q(x)
     k = self.conv_k(c)
     v = self.conv_v(c)
-    
+
     x, self.attn = self.attention(q, k, v, mask=attn_mask)
 
     x = self.conv_o(x)
@@ -152,7 +155,7 @@ class MultiHeadAttention(nn.Module):
     scores = torch.matmul(query / math.sqrt(self.k_channels), key.transpose(-2, -1))
     if self.window_size is not None:
       assert t_s == t_t, "Relative attention is only available for self-attention."
-      key_relative_embeddings = self._get_relative_embeddings(self.emb_rel_k, t_s)
+      key_relative_embeddings = self._get_relative_embeddings(self.emb_rel_k, t_s).to(device=self.device)
       rel_logits = self._matmul_with_relative_keys(query /math.sqrt(self.k_channels), key_relative_embeddings)
       scores_local = self._relative_position_to_absolute_position(rel_logits)
       scores = scores + scores_local
@@ -170,7 +173,7 @@ class MultiHeadAttention(nn.Module):
     output = torch.matmul(p_attn, value)
     if self.window_size is not None:
       relative_weights = self._absolute_position_to_relative_position(p_attn)
-      value_relative_embeddings = self._get_relative_embeddings(self.emb_rel_v, t_s)
+      value_relative_embeddings = self._get_relative_embeddings(self.emb_rel_v, t_s).to(device=self.device)
       output = output + self._matmul_with_relative_values(relative_weights, value_relative_embeddings)
     output = output.transpose(2, 3).contiguous().view(b, d, t_t) # [b, n_h, t_t, d_k] -> [b, d, t_t]
     return output, p_attn
@@ -267,8 +270,8 @@ class FFN(nn.Module):
     else:
       self.padding = self._same_padding
 
-    self.conv_1 = nn.Conv1d(in_channels, filter_channels, kernel_size)
-    self.conv_2 = nn.Conv1d(filter_channels, out_channels, kernel_size)
+    self.conv_1 = nn.Conv1d(in_channels, filter_channels, kernel_size,device='cuda')
+    self.conv_2 = nn.Conv1d(filter_channels, out_channels, kernel_size,device='cuda')
     self.drop = nn.Dropout(p_dropout)
 
   def forward(self, x, x_mask):
@@ -280,7 +283,7 @@ class FFN(nn.Module):
     x = self.drop(x)
     x = self.conv_2(self.padding(x * x_mask))
     return x * x_mask
-  
+
   def _causal_padding(self, x):
     if self.kernel_size == 1:
       return x
