@@ -89,7 +89,7 @@ async def handler(websocket):
 
         print(text)
         length_scale, text = get_label_value(text, 'LENGTH', 1.35, 'length scale')
-        noise_scale, text = get_label_value(text, 'NOISE', 0.667, 'noise scale')
+        noise_scale, text = get_label_value(text, 'NOISE', 0.3, 'noise scale')
         noise_scale_w, text = get_label_value(text, 'NOISEW', 0.8, 'deviation of noise')
         cleaned, text = get_label(text, 'CLEANED')
 
